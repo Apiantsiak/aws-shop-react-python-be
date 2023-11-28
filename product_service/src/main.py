@@ -1,17 +1,25 @@
+from decimal import Decimal
 from uuid import uuid4
-from typing import Optional
 
 import boto3
-from fastapi import FastAPI, HTTPException, Depends, Path
+from fastapi import (
+    FastAPI,
+    HTTPException,
+    Depends,
+    Path,
+    Response,
+    status,
+    Request
+)
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from mangum import Mangum
 from mypy_boto3_dynamodb import DynamoDBClient
 from pydantic import BaseModel, Field
 
-app = FastAPI(
-    title="ProductApi",
-    version="0.1",
-    root_path="/prod/"
-)
+app = FastAPI(title="ProductApi", version="0.1")
+
 handler = Mangum(app)
 
 
@@ -23,17 +31,26 @@ def get_dynamo_client() -> DynamoDBClient:
 class ProductsResponse(BaseModel):
     id: str
     count: int = Field(gt=0)
-    price: float = Field(gt=0)
+    price: Decimal
     title: str
     description: str
 
 
 class ProductsRequest(BaseModel):
-    id: Optional[str] = None
     count: int = Field(gt=0)
-    price: float = Field(gt=0)
+    price: Decimal
     title: str
     description: str
+
+
+@app.exception_handler(RequestValidationError)
+def validation_exception_handler(
+        request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content=jsonable_encoder({"detail": exc.errors(), "body": request.path_params}),
+    )
 
 
 @app.get("/products", response_model=list[ProductsResponse])
@@ -72,29 +89,56 @@ async def product_by_id(
     return product
 
 
-@app.post("/products", response_model=ProductsResponse)
+@app.post(
+    path="/products",
+    response_model=ProductsResponse,
+)
 async def create_product(
+        response: Response,
         product_request: ProductsRequest,
-        db_client: DynamoDBClient = Depends(get_dynamo_client),
 ):
-    new_product_id = f"{uuid4().hex}"
-    new_product = {
-        "id": new_product_id,
-        "price": product_request.price,
-        "title": product_request.title,
-        "description": product_request.description,
-    }
+    try:
+        new_product_id = f"{uuid4().hex}"
 
-    new_stock = {
-        "product_id": new_product_id,
-        "count": product_request.count,
-    }
-    product_table = db_client.Table("Products")
-    stocks_table = db_client.Table("Stocks")
+        new_product_response = {
+            "id": new_product_id,
+            "price": product_request.price,
+            "title": product_request.title,
+            "description": product_request.description,
+        }
 
-    product_table.put_item(Item=new_product)
-    stocks_table.put_item(Item=new_stock)
-
-    new_product["count"] = new_stock["count"]
-
-    return product_request
+        boto3.client("dynamodb").transact_write_items(
+            TransactItems=[
+                {
+                    'Put': {
+                        'TableName': 'Products',
+                        'Item': {
+                            'id': {'S': f"{new_product_id}"},
+                            'price': {'N': f"{product_request.price}"},
+                            'title': {'S': product_request.title},
+                            'description': {'S': product_request.description},
+                        },
+                        'ConditionExpression': 'attribute_not_exists(id)',
+                        "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
+                    }
+                },
+                {
+                    'Put': {
+                        'TableName': 'Stocks',
+                        'Item': {
+                            'product_id': {'S': f"{new_product_id}"},
+                            'count': {'N': f"{product_request.count}"},
+                        },
+                        'ConditionExpression': 'attribute_not_exists(product_id)',
+                        "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
+                    }
+                },
+            ]
+        )
+    except Exception as err:
+        response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+        response.body = {"details": err}
+    else:
+        new_product_response["count"] = product_request.count
+        response.status_code = status.HTTP_201_CREATED
+        return new_product_response

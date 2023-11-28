@@ -5,7 +5,6 @@ from aws_cdk import (
     Stack,
     aws_dynamodb as dynamodb,
     aws_lambda as _lambda,
-    aws_apigateway as apigw,
 )
 from constructs import Construct
 
@@ -17,6 +16,7 @@ class FastApiProductsStack(Stack):
         products_table = dynamodb.Table(
             self, 'ProductsTable',
             table_name='Products',
+            removal_policy=aws_cdk.RemovalPolicy.DESTROY,
             partition_key=dynamodb.Attribute(
                 name='id',
                 type=dynamodb.AttributeType.STRING
@@ -27,6 +27,7 @@ class FastApiProductsStack(Stack):
         stocks_table = dynamodb.Table(
             self, 'StocksTable',
             table_name='Stocks',
+            removal_policy=aws_cdk.RemovalPolicy.DESTROY,
             partition_key=dynamodb.Attribute(
                 name='product_id',
                 type=dynamodb.AttributeType.STRING
@@ -43,7 +44,7 @@ class FastApiProductsStack(Stack):
                     image=_lambda.Runtime.PYTHON_3_12.bundling_image,
                     command=[
                         "bash", "-c", "pip install -r req-app.txt -t /asset-output && cp -au . /asset-output"
-                             ]
+                    ]
                 )
             ),
             handler='main.handler',
@@ -57,19 +58,17 @@ class FastApiProductsStack(Stack):
         products_table.grant_read_write_data(fastapi_lambda)
         stocks_table.grant_read_write_data(fastapi_lambda)
 
-        rest_api = apigw.LambdaRestApi(
-            self,
-            "FastApiEndpoints",
-            handler=fastapi_lambda,
-            default_cors_preflight_options=apigw.CorsOptions(
-                allow_origins=apigw.Cors.ALL_ORIGINS,
-                allow_methods=apigw.Cors.ALL_METHODS,
-                allow_headers=apigw.Cors.DEFAULT_HEADERS,
-            ),
+        lambda_url = fastapi_lambda.add_function_url(
+            auth_type=_lambda.FunctionUrlAuthType.NONE,
+            cors=_lambda.FunctionUrlCorsOptions(
+                allowed_origins=["*"],
+                allowed_headers=["*"],
+                allowed_methods=[_lambda.HttpMethod.ALL]
+            )
         )
 
         aws_cdk.CfnOutput(
             self,
             "ProductServiceURl",
-            value=rest_api.url
+            value=lambda_url.url
         )

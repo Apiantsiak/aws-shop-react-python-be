@@ -7,7 +7,7 @@ from db_data import TABLES_DATA
 
 
 def get_dynamo_client() -> DynamoDBClient:
-    client = boto3.resource("dynamodb")
+    client = boto3.client("dynamodb")
     return client
 
 
