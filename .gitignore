@@ -10,3 +10,5 @@ __pycache__
 .cdk.staging
 cdk.out
 .env
+product_service/handlers/lambda_function.zip
+product_service/handlers/package_for_lambda.sh
