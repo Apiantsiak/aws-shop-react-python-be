@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-import os
 
 import aws_cdk as cdk
 
-from product_service.product_service_stack import ProductServiceStack
+from import_service.import_s3event_lambda_stack import ImportServiceStack
 from product_service.fastapi_dynamo_stack import FastApiProductsStack
 
+
 app = cdk.App()
-ProductServiceStack(app, "ProductServiceStack")
-FastApiProductsStack(app, "FastApiProductsServiceStack")
+
+FastApiProductsStack(app, construct_id="FastApiProductsServiceStack")
+ImportServiceStack(app, construct_id="ImportServiceStack")
 
 app.synth()
