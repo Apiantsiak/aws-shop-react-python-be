@@ -29,15 +29,18 @@ class ImportServiceStack(Stack):
             self,
             id="ImportCsvBucket",
             bucket_name=BUCKET,
-            block_public_access=s3.BlockPublicAccess(block_public_acls=True),
+            block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
             cors=[
                 s3.CorsRule(
                     allowed_methods=[
-                        s3.HttpMethods.GET,
                         s3.HttpMethods.PUT,
+                        s3.HttpMethods.POST,
+                        s3.HttpMethods.GET,
+                        s3.HttpMethods.DELETE,
+                        s3.HttpMethods.HEAD,
                     ],
                     allowed_origins=["*"],
-                    allowed_headers=["*"]
+                    allowed_headers=["*"],
                 )
             ],
             removal_policy=cdk.RemovalPolicy.DESTROY,
