@@ -2,4 +2,5 @@ fastapi
 uvicorn
 mangum
 boto3
-mypy-boto3-dynamodb
+boto3-stubs[dynamodb, s3, sqs, sns]
+python-dotenv
