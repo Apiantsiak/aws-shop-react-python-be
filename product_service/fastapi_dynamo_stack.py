@@ -1,7 +1,6 @@
 import os
 from typing import cast
 
-
 from aws_cdk import (
     Stack,
     Duration,
@@ -23,6 +22,8 @@ load_dotenv()
 PRODUCTS_TABLE = os.getenv("PRODUCTS_TABLE")
 STOCKS_TABLE = os.getenv("STOCKS_TABLE")
 LAMBDA_TIMEOUT = int(os.getenv("LAMBDA_TIMEOUT"))
+UPLOAD_QUEUE_NAME = os.getenv("UPLOAD_QUEUE_NAME")
+SNS_EMAIL = os.getenv("SNS_EMAIL")
 
 
 class FastApiProductsStack(Stack):
@@ -96,13 +97,21 @@ class FastApiProductsStack(Stack):
         upload_queue = sqs.Queue(
             self,
             id="UploadProductsQueue",
+            queue_name=UPLOAD_QUEUE_NAME,
             dead_letter_queue=dead_letter_queue,
-            visibility_timeout=Duration.seconds(LAMBDA_TIMEOUT * 6)
+            visibility_timeout=Duration.seconds(LAMBDA_TIMEOUT)
         )
 
         upload_event_topic = sns.Topic(
             self,
-            id="UploadProductsTopic"
+            id="UploadProductsTopic",
+            display_name="Upload Products Topic"
+        )
+
+        upload_event_topic.add_subscription(
+            topic_subscription=sns_subs.EmailSubscription(
+                email_address=SNS_EMAIL,
+            )
         )
 
         catalog_batch_process_lambda = _lambda.Function(
@@ -123,7 +132,8 @@ class FastApiProductsStack(Stack):
                 "PRODUCTS_TABLE": products_table.table_name,
                 "STOCKS_TABLE": stocks_table.table_name,
                 "UPLOAD_TOPIC_ARN": upload_event_topic.topic_arn,
-            }
+            },
+            timeout=Duration.seconds(LAMBDA_TIMEOUT)
         )
 
         catalog_batch_process_lambda.add_event_source(

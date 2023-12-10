@@ -1,23 +1,28 @@
 import os
 from typing import cast
 
-import aws_cdk as cdk
 from aws_cdk import (
     Stack,
+    CfnOutput,
+    RemovalPolicy,
+    BundlingOptions,
     aws_s3 as s3,
+    aws_sqs as sqs,
     aws_lambda as _lambda,
     aws_lambda_event_sources,
     aws_apigateway as apigw,
 )
 from constructs import Construct
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 
-load_dotenv()
+load_dotenv(find_dotenv(".env"))
 
 BUCKET = os.getenv("UPLOAD_BUCKET")
 UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER")
 PARSED_FOLDER = os.getenv("PARSED_FOLDER")
 EXPIRATION_SECONDS = int(os.getenv("EXPIRATION_SECONDS"))
+SQS_UPLOAD_ARN = os.getenv("SQS_UPLOAD_ARN")
+UPLOAD_QUEUE_NAME = os.getenv("UPLOAD_QUEUE_NAME")
 
 
 class ImportServiceStack(Stack):
@@ -43,7 +48,7 @@ class ImportServiceStack(Stack):
                     allowed_headers=["*"],
                 )
             ],
-            removal_policy=cdk.RemovalPolicy.DESTROY,
+            removal_policy=RemovalPolicy.DESTROY,
             auto_delete_objects=True
         )
 
@@ -53,7 +58,7 @@ class ImportServiceStack(Stack):
             runtime=cast(_lambda.Runtime, _lambda.Runtime.PYTHON_3_12),
             code=_lambda.Code.from_asset(
                 path='import_service/src/handlers',
-                bundling=cdk.BundlingOptions(
+                bundling=BundlingOptions(
                     image=_lambda.Runtime.PYTHON_3_12.bundling_image,
                     command=[
                         "bash", "-c", "pip install -r req-app.txt -t /asset-output && cp -au . /asset-output"
@@ -121,13 +126,19 @@ class ImportServiceStack(Stack):
             ),
         )
 
+        upload_queue = sqs.Queue.from_queue_arn(
+            self,
+            id="UploadProductsQueue",
+            queue_arn=SQS_UPLOAD_ARN,
+        )
+
         import_file_parse_lambda = _lambda.Function(
             self,
             id='ImportFileParser',
             runtime=cast(_lambda.Runtime, _lambda.Runtime.PYTHON_3_12),
             code=_lambda.Code.from_asset(
                 path='import_service/src/handlers',
-                bundling=cdk.BundlingOptions(
+                bundling=BundlingOptions(
                     image=_lambda.Runtime.PYTHON_3_12.bundling_image,
                     command=[
                         "bash", "-c", "pip install -r req-app.txt -t /asset-output && cp -au . /asset-output"
@@ -140,8 +151,10 @@ class ImportServiceStack(Stack):
                 "UPLOAD_BUCKET": s3_bucket.bucket_name,
                 "UPLOAD_FOLDER": UPLOAD_FOLDER,
                 "PARSED_FOLDER": PARSED_FOLDER,
+                "UPLOAD_QUEUE_NAME": UPLOAD_QUEUE_NAME,
             }
         )
+
         import_file_parse_lambda.add_event_source(
             source=aws_lambda_event_sources.S3EventSource(
                 bucket=s3_bucket,
@@ -150,9 +163,10 @@ class ImportServiceStack(Stack):
             )
         )
 
+        upload_queue.grant_send_messages(import_file_parse_lambda)
         s3_bucket.grant_read_write(import_file_parse_lambda)
 
-        cdk.CfnOutput(
+        CfnOutput(
             self,
             id="ImportServiceURL",
             value=rest_api.url
