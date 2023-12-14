@@ -1,9 +1,7 @@
 import json
 import logging
-from decimal import Decimal
 from uuid import uuid4
 
-import boto3
 from boto3.dynamodb.types import TypeSerializer
 from fastapi import (
     FastAPI,
@@ -18,39 +16,19 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from mangum import Mangum
-from mypy_boto3_dynamodb import DynamoDBClient
-from pydantic import BaseModel, Field
+from mypy_boto3_dynamodb import DynamoDBClient, ServiceResource
 
-app = FastAPI(title="ProductApi", version="0.1")
+from db.db_config import get_dynamo_client, get_dynamo_resource
+from entities import ProductResponse, ProductRequest, NewProduct, NewStock
 
+app = FastAPI(title="ProductApi", version="0.1.2")
 
-# handler = Mangum(app)
 
 def handler(event, context):
     logging.info(msg=json.dumps(event, indent=4))
     asgi_handler = Mangum(app)
     response = asgi_handler(event, context)
     return response
-
-
-def get_dynamo_client() -> DynamoDBClient:
-    client = boto3.resource("dynamodb")
-    return client
-
-
-class ProductsResponse(BaseModel):
-    id: str
-    count: int = Field(gt=0)
-    price: Decimal
-    title: str
-    description: str
-
-
-class ProductsRequest(BaseModel):
-    count: int = Field(gt=0)
-    price: Decimal
-    title: str
-    description: str
 
 
 @app.exception_handler(RequestValidationError)
@@ -63,12 +41,12 @@ def validation_exception_handler(
     )
 
 
-@app.get(path="/products", response_model=list[ProductsResponse])
+@app.get(path="/products", response_model=list[ProductResponse])
 async def products_list(
-        db_client: DynamoDBClient = Depends(get_dynamo_client)
+        db_resource: ServiceResource = Depends(get_dynamo_resource)
 ):
-    product_table = db_client.Table("Products")
-    stocks_table = db_client.Table("Stocks")
+    product_table = db_resource.Table("Products")
+    stocks_table = db_resource.Table("Stocks")
 
     products = product_table.scan().get("Items")
     stocks = stocks_table.scan().get("Items")
@@ -82,50 +60,49 @@ async def products_list(
     return products
 
 
-@app.get(path="/products/{product_id}", response_model=ProductsResponse)
+@app.get(path="/products/{product_id}", response_model=ProductResponse)
 async def product_by_id(
-        product_id: str = Path(example="207ac7a46e434349b55e0daef544aeb6"),
-        db_client: DynamoDBClient = Depends(get_dynamo_client)
+        product_id: str = Path(example="655dac49-233f-4133-83c1-310adb1987cf"),
+        db_resource: ServiceResource = Depends(get_dynamo_resource)
 ):
-    product_table = db_client.Table("Products")
-    stocks_table = db_client.Table("Stocks")
+    product_table = db_resource.Table("Products")
+    stocks_table = db_resource.Table("Stocks")
 
     product = product_table.get_item(Key={"id": product_id}).get("Item")
     stock = stocks_table.get_item(Key={"product_id": product_id}).get("Item")
     if not product:
-        raise HTTPException(status_code=404, detail=f"Product with {product_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Product with {product_id} not found"
+        )
+
     product["count"] = stock["count"]
 
     return product
 
 
-@app.post(path="/products", response_model=ProductsResponse)
+@app.post(path="/products", response_model=ProductResponse)
 async def create_product(
         response: Response,
-        product_request: ProductsRequest,
+        product_request: ProductRequest,
         db_serializer: TypeSerializer = Depends(TypeSerializer),
+        db_client: DynamoDBClient = Depends(get_dynamo_client),
 ):
     try:
-        new_product_id = f"{uuid4().hex}"
+        new_product_id = f"{uuid4()}"
+        product_response = {"id": new_product_id, **product_request.model_dump()}
 
-        new_product = {
-            "id": new_product_id,
-            "price": product_request.price,
-            "title": product_request.title,
-            "description": product_request.description,
-        }
-
-        new_stock = {
-            "product_id": new_product_id,
-            "count": product_request.count,
-        }
+        new_product = NewProduct(id=new_product_id, **product_request.model_dump())
+        new_stock = NewStock(product_id=new_product_id, **product_request.model_dump())
 
         queue = [
             ("Put", table, item)
-            for table, item in [("Products", new_product), ("Stocks", new_stock)]
+            for table, item in [
+                ("Products", new_product.model_dump()),
+                ("Stocks", new_stock.model_dump())
+            ]
         ]
 
-        boto3.client("dynamodb").transact_write_items(
+        db_client.transact_write_items(
             TransactItems=[
                 {
                     method: {
@@ -140,10 +117,9 @@ async def create_product(
                 } for method, table, item in queue
             ]
         )
+
     except Exception as err:
-        response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
-        response.body = {"details": err}
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"{err}")
     else:
-        new_product["count"] = product_request.count
         response.status_code = status.HTTP_201_CREATED
-        return new_product
+        return product_response

@@ -1,3 +1,4 @@
 pytest
 pytest-mock
 moto
+pydantic-settings>=2.1.0

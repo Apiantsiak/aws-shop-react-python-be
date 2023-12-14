@@ -1,15 +1,14 @@
 import json
 import os
-from decimal import Decimal
 from uuid import uuid4
 
 import boto3
-from aws_lambda_powertools.utilities.parser import BaseModel
 from aws_lambda_powertools.utilities.parser import event_parser, envelopes
 from aws_lambda_powertools.utilities.typing import LambdaContext
 from boto3.dynamodb.types import TypeSerializer
 from mypy_boto3_sns import SNSClient
-from pydantic import Field
+
+from entities import ProductRequest, NewProduct, NewStock
 
 UPLOAD_TOPIC_ARN = os.environ.get("UPLOAD_TOPIC_ARN")
 
@@ -17,39 +16,21 @@ db_client = boto3.client("dynamodb")
 sns_client: SNSClient = boto3.client("sns")
 
 
-class ProductSqsRecord(BaseModel):
-    count: int = Field(gt=0)
-    price: Decimal
-    title: str
-    description: str
-
-
-class NewProduct(BaseModel):
-    id: str
-    price: Decimal
-    title: str
-    description: str
-
-
-class NewStock(BaseModel):
-    product_id: str
-    count: int = Field(gt=0)
-
-
-def create_products(products: list[ProductSqsRecord]):
+def create_products(products: list[ProductRequest]):
     try:
         db_serializer: TypeSerializer = TypeSerializer()
+
         pr_items = []
         st_items = []
         for product in products:
-            product_id = f"{uuid4()}"
+            new_product_id = f"{uuid4()}"
             pr_items.append(
                 {
                     "Put": {
                         'TableName': "Products",
                         'Item': {
                             key: db_serializer.serialize(val) for key, val in NewProduct(
-                                id=product_id, **product.dict()
+                                id=new_product_id, **product.model_dump()
                             )
                         },
                         'ConditionExpression': 'attribute_not_exists(id)',
@@ -63,7 +44,7 @@ def create_products(products: list[ProductSqsRecord]):
                         'TableName': "Stocks",
                         'Item': {
                             key: db_serializer.serialize(val) for key, val in NewStock(
-                                product_id=product_id, **product.dict()
+                                product_id=new_product_id, **product.model_dump()
                             )
                         },
                         'ConditionExpression': 'attribute_not_exists(id)',
@@ -74,37 +55,38 @@ def create_products(products: list[ProductSqsRecord]):
         boto3.client("dynamodb").transact_write_items(
             TransactItems=pr_items + st_items
         )
-        return pr_items + st_items
+        return pr_items, st_items
     except Exception as err:
         print(err)
         raise err
 
 
-@event_parser(model=ProductSqsRecord, envelope=envelopes.SqsEnvelope)
-def handler(event: ProductSqsRecord, context: LambdaContext):
+@event_parser(model=ProductRequest, envelope=envelopes.SqsEnvelope)
+def handler(event: list[ProductRequest], context: LambdaContext):
     try:
-        uploaded_items = create_products(event)
+        print(event)
+        uploaded_products, uploaded_stocks = create_products(event)
         sns_client.publish(
             TopicArn=UPLOAD_TOPIC_ARN,
             Subject="[CATALOG BATCH] Upload products from CSV",
             Message=json.dumps(
                 {
-                    "Items": uploaded_items,
-                    "Count": len(uploaded_items),
-                    "Message": "Products were successfully uploaded from csv",
-                }
+                    "Products": uploaded_products,
+                    "Stocks": uploaded_stocks,
+                    "Count": len(uploaded_products + uploaded_stocks),
+                    "Message": "Products were successfully uploaded from CSV!",
+                },
+                indent=4,
             )
         )
     except Exception as err:
-        uploaded_items = create_products(event)
         sns_client.publish(
             TopicArn=UPLOAD_TOPIC_ARN,
             Subject="[CATALOG BATCH] Upload products from CSV",
             Message=json.dumps(
                 {
-                    "Items": uploaded_items,
-                    "Count": len(uploaded_items),
-                    "Message": err,
+                    "Message": "Upload from CSV is failed!",
+                    "Error": f"{err}",
                 },
                 indent=4,
             )

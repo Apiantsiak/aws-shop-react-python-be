@@ -1,14 +1,19 @@
 import json
 
 import boto3
-from mypy_boto3_dynamodb import DynamoDBClient
+from mypy_boto3_dynamodb import DynamoDBClient, ServiceResource
 
-from db_data import TABLES_DATA
+from .db_data import TABLES_DATA
 
 
 def get_dynamo_client() -> DynamoDBClient:
     client = boto3.client("dynamodb")
     return client
+
+
+def get_dynamo_resource() -> ServiceResource:
+    resource = boto3.resource("dynamodb")
+    return resource
 
 
 def _fill_database(client: DynamoDBClient) -> None:
