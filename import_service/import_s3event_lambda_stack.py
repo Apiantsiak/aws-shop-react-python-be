@@ -2,6 +2,7 @@ from typing import cast
 
 from aws_cdk import (
     Stack,
+    Duration,
     CfnOutput,
     RemovalPolicy,
     BundlingOptions,
@@ -67,6 +68,20 @@ class ImportServiceStack(Stack):
 
         s3_bucket.grant_put(import_file_lambda)
 
+        basic_auth_lambda = _lambda.Function.from_function_arn(
+            self,
+            id="ImportTokenAuthLambda",
+            function_arn=settings.BASIC_AUTH_LAMBDA_ARN,
+        )
+
+        authorizer = apigw.TokenAuthorizer(
+            self,
+            id="ImportTokenAuthorizer",
+            authorizer_name="BasicTokenAuthorizer",
+            handler=basic_auth_lambda,
+            results_cache_ttl=Duration.seconds(0)
+        )
+
         rest_api = apigw.RestApi(
             self,
             id="ImportRestApiGateway",
@@ -76,6 +91,10 @@ class ImportServiceStack(Stack):
                 allow_methods=apigw.Cors.ALL_METHODS,
                 allow_headers=apigw.Cors.DEFAULT_HEADERS,
             ),
+            default_method_options=apigw.MethodOptions(
+                authorizer=authorizer
+            ),
+            api_key_source_type=apigw.ApiKeySourceType.HEADER,
             deploy_options=apigw.StageOptions(
                 stage_name="dev",
             )
