@@ -1,7 +1,7 @@
 import json
 from unittest.mock import patch
 
-from import_service.src.handlers.import_handler import handler
+from import_service.src.import_handler import handler
 
 
 def test_handler_with_valid_name(mock_event):

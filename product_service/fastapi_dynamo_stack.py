@@ -1,4 +1,3 @@
-import os
 from typing import cast
 
 from aws_cdk import (
@@ -15,15 +14,7 @@ from aws_cdk import (
     aws_sqs as sqs,
 )
 from constructs import Construct
-from dotenv import load_dotenv
-
-load_dotenv()
-
-PRODUCTS_TABLE = os.getenv("PRODUCTS_TABLE")
-STOCKS_TABLE = os.getenv("STOCKS_TABLE")
-LAMBDA_TIMEOUT = int(os.getenv("LAMBDA_TIMEOUT"))
-UPLOAD_QUEUE_NAME = os.getenv("UPLOAD_QUEUE_NAME")
-SNS_EMAIL = os.getenv("SNS_EMAIL")
+from .src.config import settings
 
 
 class FastApiProductsStack(Stack):
@@ -33,7 +24,7 @@ class FastApiProductsStack(Stack):
 
         products_table = dynamodb.Table(
             self, 'ProductsTable',
-            table_name=PRODUCTS_TABLE,
+            table_name=settings.PRODUCTS_TABLE,
             removal_policy=RemovalPolicy.DESTROY,
             partition_key=dynamodb.Attribute(
                 name='id',
@@ -44,7 +35,7 @@ class FastApiProductsStack(Stack):
 
         stocks_table = dynamodb.Table(
             self, 'StocksTable',
-            table_name=STOCKS_TABLE,
+            table_name=settings.STOCKS_TABLE,
             removal_policy=RemovalPolicy.DESTROY,
             partition_key=dynamodb.Attribute(
                 name='product_id',
@@ -97,9 +88,9 @@ class FastApiProductsStack(Stack):
         upload_queue = sqs.Queue(
             self,
             id="UploadProductsQueue",
-            queue_name=UPLOAD_QUEUE_NAME,
+            queue_name=settings.UPLOAD_QUEUE_NAME,
             dead_letter_queue=dead_letter_queue,
-            visibility_timeout=Duration.seconds(LAMBDA_TIMEOUT)
+            visibility_timeout=Duration.seconds(settings.LAMBDA_TIMEOUT)
         )
 
         upload_event_topic = sns.Topic(
@@ -110,7 +101,7 @@ class FastApiProductsStack(Stack):
 
         upload_event_topic.add_subscription(
             topic_subscription=sns_subs.EmailSubscription(
-                email_address=SNS_EMAIL,
+                email_address=settings.SNS_EMAIL,
             )
         )
 
@@ -133,7 +124,7 @@ class FastApiProductsStack(Stack):
                 "STOCKS_TABLE": stocks_table.table_name,
                 "UPLOAD_TOPIC_ARN": upload_event_topic.topic_arn,
             },
-            timeout=Duration.seconds(LAMBDA_TIMEOUT)
+            timeout=Duration.seconds(settings.LAMBDA_TIMEOUT)
         )
 
         catalog_batch_process_lambda.add_event_source(

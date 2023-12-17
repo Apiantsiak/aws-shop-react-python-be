@@ -1,4 +1,3 @@
-import os
 from typing import cast
 
 from aws_cdk import (
@@ -13,16 +12,8 @@ from aws_cdk import (
     aws_apigateway as apigw,
 )
 from constructs import Construct
-from dotenv import load_dotenv, find_dotenv
 
-load_dotenv(find_dotenv(".env"))
-
-BUCKET = os.getenv("UPLOAD_BUCKET")
-UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER")
-PARSED_FOLDER = os.getenv("PARSED_FOLDER")
-EXPIRATION_SECONDS = int(os.getenv("EXPIRATION_SECONDS"))
-SQS_UPLOAD_ARN = os.getenv("SQS_UPLOAD_ARN")
-UPLOAD_QUEUE_NAME = os.getenv("UPLOAD_QUEUE_NAME")
+from .src.config import settings
 
 
 class ImportServiceStack(Stack):
@@ -33,7 +24,7 @@ class ImportServiceStack(Stack):
         s3_bucket = s3.Bucket(
             self,
             id="ImportCsvBucket",
-            bucket_name=BUCKET,
+            bucket_name=settings.UPLOAD_BUCKET,
             block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
             cors=[
                 s3.CorsRule(
@@ -57,7 +48,7 @@ class ImportServiceStack(Stack):
             id='ImportFile',
             runtime=cast(_lambda.Runtime, _lambda.Runtime.PYTHON_3_12),
             code=_lambda.Code.from_asset(
-                path='import_service/src/handlers',
+                path='import_service/src',
                 bundling=BundlingOptions(
                     image=_lambda.Runtime.PYTHON_3_12.bundling_image,
                     command=[
@@ -69,8 +60,8 @@ class ImportServiceStack(Stack):
             function_name='import_file',
             environment={
                 "UPLOAD_BUCKET": s3_bucket.bucket_name,
-                "UPLOAD_FOLDER": UPLOAD_FOLDER,
-                "EXPIRATION_SECONDS": f"{EXPIRATION_SECONDS}",
+                "UPLOAD_FOLDER": settings.UPLOAD_FOLDER,
+                "EXPIRATION_SECONDS": f"{settings.EXPIRATION_SECONDS}",
             }
         )
 
@@ -129,7 +120,7 @@ class ImportServiceStack(Stack):
         upload_queue = sqs.Queue.from_queue_arn(
             self,
             id="UploadProductsQueue",
-            queue_arn=SQS_UPLOAD_ARN,
+            queue_arn=settings.SQS_UPLOAD_ARN,
         )
 
         import_file_parse_lambda = _lambda.Function(
@@ -137,7 +128,7 @@ class ImportServiceStack(Stack):
             id='ImportFileParser',
             runtime=cast(_lambda.Runtime, _lambda.Runtime.PYTHON_3_12),
             code=_lambda.Code.from_asset(
-                path='import_service/src/handlers',
+                path='import_service/src',
                 bundling=BundlingOptions(
                     image=_lambda.Runtime.PYTHON_3_12.bundling_image,
                     command=[
@@ -149,9 +140,9 @@ class ImportServiceStack(Stack):
             function_name='import_file_parser',
             environment={
                 "UPLOAD_BUCKET": s3_bucket.bucket_name,
-                "UPLOAD_FOLDER": UPLOAD_FOLDER,
-                "PARSED_FOLDER": PARSED_FOLDER,
-                "UPLOAD_QUEUE_NAME": UPLOAD_QUEUE_NAME,
+                "UPLOAD_FOLDER": settings.UPLOAD_FOLDER,
+                "PARSED_FOLDER": settings.PARSED_FOLDER,
+                "UPLOAD_QUEUE_NAME": settings.UPLOAD_QUEUE_NAME,
             }
         )
 
@@ -159,7 +150,7 @@ class ImportServiceStack(Stack):
             source=aws_lambda_event_sources.S3EventSource(
                 bucket=s3_bucket,
                 events=[s3.EventType.OBJECT_CREATED],
-                filters=[s3.NotificationKeyFilter(prefix=UPLOAD_FOLDER, suffix=".csv")],
+                filters=[s3.NotificationKeyFilter(prefix=settings.UPLOAD_FOLDER, suffix=".csv")],
             )
         )
 
