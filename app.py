@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
-import os
 
 import aws_cdk as cdk
 
-from product_service.product_service_stack import ProductServiceStack
+from import_service.import_s3event_lambda_stack import ImportServiceStack
+from product_service.fastapi_dynamo_stack import FastApiProductsStack
+from authorization_service.authorization_lamda_stack import AuthorizationServiceStack
 
 
 app = cdk.App()
-ProductServiceStack(
-    app, "ProductServiceStack",
-    env=cdk.Environment(
-        account=os.getenv('CDK_DEFAULT_ACCOUNT'),
-        region=os.getenv('CDK_DEFAULT_REGION'),
-    ),
-)
+
+FastApiProductsStack(app, construct_id="FastApiProductsServiceStack")
+ImportServiceStack(app, construct_id="ImportServiceStack")
+AuthorizationServiceStack(app, construct_id="AuthorizationServiceStack")
 
 app.synth()

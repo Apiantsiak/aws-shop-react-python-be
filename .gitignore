@@ -3,10 +3,12 @@
 package-lock.json
 __pycache__
 .pytest_cache
-.venv
+venv
 *.egg-info
 
 # CDK asset staging directory
 .cdk.staging
 cdk.out
 .env
+product_service/handlers/lambda_function.zip
+product_service/handlers/package_for_lambda.sh
